@@ -1,155 +1,134 @@
 # frozen_string_literal: true
 
-require_relative 'player'
-require_relative 'bank'
-require_relative 'deck'
-
 class Game
   def initialize
-    @dealer = Player.new({ name: 'Dealer',  cards: [] })
+    @interface = Interface.new
     @bank = Bank.new({ player_account: 100, dealer_account: 100, game_account: 0 })
-    init
-  end
-
-  def init
-    puts "BlackJack
-    Как твое имя?"
-    user_name = gets.chomp
-    puts "Приветсвую, #{user_name}, мы начинаем!"
-    @player = Player.new({ name: user_name, cards: [] })
+    @dialer = Dialer.new
+    @user = User.new({ name: @interface.namestart })
+    start
   end
 
   def start
+    @open_cards = false
     @deck = Deck.new
-    @player.cards = []
-    @dealer.cards = []
-    @bank.player_account -= 10
-    @bank.dealer_account -= 10
-    @bank.game_account += 20
-    puts "Ставки сделаны: остаток на Вашем счете #{@bank.player_account},
-    у Дилера #{@bank.dealer_account},
-    в банке игры: #{@bank.game_account}"
-    sleep 1
-    puts 'Раздача карт ... '
-    sleep 1
-    @deck.shuffle
-    give_cards(@player, 2)
-    give_cards(@dealer, 2)
-    info
+    start_turn_bank
+    make_hands
+    deal_cards
+    @interface.distribution(@bank.player_account, @bank.dealer_account, @bank.game_account)
+    show_info
     next_step
   end
 
+  def make_hands
+    @user_hand = Hand.new
+    @dialer_hand = Hand.new
+  end
+
+  def deal_cards
+    @user_hand.take_cards(@deck.deal_cards(2))
+    @dialer_hand.take_cards(@deck.deal_cards(2))
+  end
+
+  def start_turn_bank
+    @bank.player_account -= 10
+    @bank.dealer_account -= 10
+    @bank.game_account += 20
+  end
+
   def next_step
-    puts "Ваш ход:
-    1. Пропустить ход
-    2. Добавить карту
-    3. Открыть карты"
-    choise = gets.chomp.to_i
+    choise = @interface.select(@user_hand.can_take_card?)
     case choise
     when 1
       dealer_move
     when 2
-      give_cards(@player, 1) if @player.cards.size < 3
-      puts 'Вы взяли карту'
-      sleep 1
-      info
-      check
-      dealer_move
+      add_card
     when 3
       open_cards
     end
   end
 
-  def give_cards(player, count)
-    while count.positive?
-      count -= 1
-      player.cards << @deck.cards.slice!(0)
-    end
-  end
-
-  def count_points(cards)
-    points = 0
-    cards.each do |card|
-      case card[0]
-      when /[1KQJ]/
-        points += 10
-      when /[2-9]/
-        points += card[0].to_i
-      when /A/
-        points += if points <= 10
-                    11
-                  else
-                    1
-                  end
-      end
-    end
-    points
+  def add_card
+    @user_hand.take_cards(@deck.deal_cards(1)) if @user_hand.can_take_card? && @dialer_hand.over_score?
+    show_info
+    sleep 1
+    check
+    dealer_move
   end
 
   def dealer_move
-    puts 'Ход дилера'
-    sleep 1
-    dealer_points = count_points(@dealer.cards)
-    if dealer_points < 16 && @dealer.cards.size < 3
-      give_cards(@dealer, 1)
-      puts 'Дилер взял карту'
-      info
-      sleep 1
-      next_step if check
+    @interface.dealer_info
+    if @dialer_hand.can_take_card? && @dialer_hand.over_score?
+      if take_more_card?(@dialer_hand.score)
+        @dialer_hand.take_cards(@deck.deal_one_card)
+        @interface.dealer_take
+        next_step if check
+      else
+        @interface.dealer_skip
+        next_step
+      end
     else
-      puts 'Дилер пропустил ход'
-      sleep 1
-      next_step
+      open_cards
     end
-    info
   end
 
   def open_cards
-    puts 'Вскрываем карты!'
-    sleep 2
-    dealer_points = count_points(@dealer.cards)
-    player_points = count_points(@player.cards)
-    puts "Карты дилера: #{@dealer.cards}. Сумма очков: #{dealer_points}"
-    puts "Ваши карты: #{@player.cards}. Cумма очков: #{player_points}"
-    sleep 1
-    if (dealer_points <= 21 && dealer_points > player_points) || player_points > 21
-      sleep 1
-      puts 'ПОРАЖЕНИЕ'
-      @bank.dealer_account += @bank.game_account
-      @bank.game_account -= @bank.game_account
-    elsif player_points <= 21 && dealer_points < player_points || dealer_points > 21
-      sleep 1
-      puts 'ПОБЕДА!'
-      @bank.player_account += @bank.game_account
-      @bank.game_account -= @bank.game_account
-    elsif player_points == dealer_points || (player_points > 21 && dealer_points > 21)
-      sleep 1
-      puts 'НИЧЬЯ'
+    @interface.open
+    @interface.info_cards_and_points(game_results)
+    if @user_hand.score == @dialer_hand.score
+      @interface.draw
+    elsif (@user_hand.score > @dialer_hand.score && @user_hand.over_score?) || @dialer_hand.score > 21
+      gamer_win
+    elsif (@user_hand.score < @dialer_hand.score && @dialer_hand.over_score?) || @user_hand.score > 21
+      gamer_lose
     end
-    puts 'Хотите сыграть еще раз? 1-ДА/ 2-НЕТ'
-    if gets.chomp == '1'
+    the_end
+  end
+
+  def the_end
+    @interface.the_end_select
+    imput = gets.chomp.to_i
+    case imput
+    when 1
       start
-    else
-      abort 'Спасибо за игру! До встречи!'
+    when 2
+      @interface.end
+      abort
     end
   end
 
-  def info
-    str = ''
-    @dealer.cards.each { str += '*' }
-    puts "Карты дилера: #{str}"
-    puts "Ваши карты: #{@player.cards} сумма очков: #{count_points(@player.cards)}"
+  def gamer_win
+    @interface.win
+    @bank.player_account += @bank.game_account
+    @bank.game_account -= @bank.game_account
+  end
+
+  def gamer_lose
+    @interface.lose
+    @bank.dealer_account += @bank.game_account
+    @bank.game_account -= @bank.game_account
+  end
+
+  def take_more_card?(score)
+    score < 16
   end
 
   def check
-    if @dealer.cards.size >= 3 && @player.cards.size >= 3
+    if @dialer_hand.maybe_end? && @user_hand.maybe_end?
       false
       open_cards
     else
       true
     end
   end
-end
 
-game = Game.new
-game.start
+  def game_results
+    { user_score: @user_hand.score,
+      dialer_score: @dialer_hand.score }
+  end
+
+  def show_info
+    @interface.show_cards_on_table({ user: @user, user_hand: @user_hand,
+                                     dialer: @dialer, dialer_hand: @dialer_hand, open_cards: @open_cards })
+  end
+end

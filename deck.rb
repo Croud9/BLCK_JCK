@@ -4,15 +4,24 @@ class Deck
   attr_reader :cards
 
   def initialize
-    @cards = []
-    suits = %w[+ <3 <> ^]
-    values = %w[2 3 4 5 6 7 8 9 10 J Q K A]
-    suits.each do |suit|
-      values.each { |value| @cards << value.to_s + suit }
-    end
+    @cards = make_cards
   end
 
-  def shuffle
-    @cards.shuffle!
+  def deal_cards(count)
+    @cards.sample(count)
+  end
+
+  def deal_one_card
+    deal_cards(1)
+  end
+
+  def make_cards
+    cards = []
+    Card::VALUE.each do |value|
+      Card::SUIT.each do |suit|
+        cards << Card.new(suit, value)
+      end
+    end
+    cards.shuffle!
   end
 end
